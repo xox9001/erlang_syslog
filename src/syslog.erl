@@ -31,18 +31,10 @@
          handle_info/2, terminate/2, code_change/3]).
 
 %% api callbacks
--export([start_link/0, start_link/1, start_link/3, start_link/4, start_link/5,
-         send/1, send/2, send/3,
-         emergency/1, emergency/2, emergency/3,
-         alert/1, alert/2, alert/3,
-         critical/1, critical/2, critical/3,
-         error/1, error/2, error/3,
-         warning/1, warning/2, warning/3,
-         notice/1, notice/2, notice/3,
-         info/1, info/2, info/3,
-         debug/1, debug/2, debug/3]).
+-export([start_link/0, start_link/1,
+         send/1, send/2, send/3]).
 
--record(state, {socket, address, port, facility, app_name}).
+-record(state, {socket, address, port, facility, app_name,host}).
 
 -define(DEFAULT_FACILITY, local0).
 
@@ -53,23 +45,23 @@ start_link() ->
     {ok, Host} = inet:gethostname(),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [?MODULE, Host, 514, ?DEFAULT_FACILITY], []).
 
-start_link(Name) ->
+start_link(Name) when is_atom(Name) ->
     {ok, Host} = inet:gethostname(),
-    gen_server:start_link({local, Name}, ?MODULE, [?MODULE, Host, 514, ?DEFAULT_FACILITY], []).
+    gen_server:start_link({local, Name},  ?MODULE, [Name, Host, 514, ?DEFAULT_FACILITY], []).
 
-start_link(Name, Host, Port) when is_atom(Name), is_list(Host), is_integer(Port) ->
-    gen_server:start_link({local, Name}, ?MODULE, [?MODULE, Host, Port, ?DEFAULT_FACILITY], []).
+%% start_link(Name, Host, Port) when is_atom(Name), is_list(Host), is_integer(Port) ->
+%%     gen_server:start_link({local, Name}, ?MODULE, [?MODULE, Host, Port, ?DEFAULT_FACILITY], []).
+%% 
+%% start_link(Name, Host, Port, Facility) when is_atom(Name), is_list(Host),
+%%                                            is_integer(Port), is_atom(Facility) ->
+%%     gen_server:start_link({local, Name}, ?MODULE, [?MODULE, Host, Port, Facility], []).
+%% 
+%% start_link(Name, AppName, Host, Port, Facility) when is_atom(Name), is_atom(AppName), is_list(Host),
+%%                                                  is_integer(Port), is_atom(Facility) ->
+%%     gen_server:start_link({local, Name}, ?MODULE, [AppName, Host, Port, Facility], []).
 
-start_link(Name, Host, Port, Facility) when is_atom(Name), is_list(Host),
-                                           is_integer(Port), is_atom(Facility) ->
-    gen_server:start_link({local, Name}, ?MODULE, [?MODULE, Host, Port, Facility], []).
-
-start_link(Name, AppName, Host, Port, Facility) when is_atom(Name), is_atom(AppName), is_list(Host),
-                                                 is_integer(Port), is_atom(Facility) ->
-    gen_server:start_link({local, Name}, ?MODULE, [AppName, Host, Port, Facility], []).
-
-send(Msg) when is_list(Msg) ->
-    send(?MODULE, Msg).
+send(Msg) ->
+    gen_server:call(name,{send,Msg}).
 
 send(Msg, Opts) when is_list(Msg), is_list(Opts) ->
     send(?MODULE, Msg, []);
@@ -78,81 +70,12 @@ send(Name, Msg) when is_list(Msg) ->
     send(Name, Msg, []).
 
 send(Name, Msg, Opts) when is_list(Msg), is_list(Opts) ->
-    Packet = build_packet(Name, Msg, Opts),
-    %io:format("~p~n", [Packet]),
-    gen_server:cast(Name, {send, Packet}).
-
-emergency(Msg) ->
-  emergency(?MODULE, Msg, []).
-
-emergency(Name, Msg) ->
-  emergency(Name, Msg, []).
-
-emergency(Name, Msg, Opts) ->
-  send(Name, Msg, [{level, emergency}] ++ Opts).
-
-alert(Msg) ->
-  alert(?MODULE, Msg, []).
-
-alert(Name, Msg) ->
-  alert(Name, Msg, []).
-
-alert(Name, Msg, Opts) ->
-  send(Name, Msg, [{level, alert}] ++ Opts).
-
-critical(Msg) ->
-  critical(?MODULE, Msg, []).
-
-critical(Name, Msg) ->
-  critical(Name, Msg, []).
-
-critical(Name, Msg, Opts) ->
-  send(Name, Msg, [{level, critical}] ++ Opts).
-
-error(Msg) ->
-  error(?MODULE, Msg, []).
-
-error(Name, Msg) ->
-  error(Name, Msg, []).
-
-error(Name, Msg, Opts) ->
-  send(Name, Msg, [{level, error}] ++ Opts).
-
-warning(Msg) ->
-  warning(?MODULE, Msg, []).
-
-warning(Name, Msg) ->
-  warning(Name, Msg, []).
-
-warning(Name, Msg, Opts) ->
-  send(Name, Msg, [{level, warning}] ++ Opts).
-
-notice(Msg) ->
-  notice(?MODULE, Msg, []).
-
-notice(Name, Msg) ->
-  notice(Name, Msg, []).
-
-notice(Name, Msg, Opts) ->
-  send(Name, Msg, [{level, notice}] ++ Opts).
-
-info(Msg) ->
-  info(?MODULE, Msg, []).
-
-info(Name, Msg) ->
-  info(Name, Msg, []).
-
-info(Name, Msg, Opts) ->
-  send(Name, Msg, [{level, info}] ++ Opts).
-
-debug(Msg) ->
-  debug(?MODULE, Msg, []).
-
-debug(Name, Msg) ->
-  debug(Name, Msg, []).
-
-debug(Name, Msg, Opts) ->
-  send(Name, Msg, [{level, debug}] ++ Opts).
+%% 	Packet = build_packet(Name, Msg, Opts),
+%% 	io:format("~p~n", [Msg]),
+%% sync
+%%     gen_server:call(Name, {send, Msg}).
+%% async
+	gen_server:cast(Name, {send, Msg}).
 
 %%====================================================================
 %% gen_server callbacks
@@ -166,15 +89,18 @@ debug(Name, Msg, Opts) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([AppName, Host, Port, Facility]) ->
-    {ok, Addr} = inet:getaddr(Host, inet),
-    case gen_udp:open(0) of
+%%     {ok, Addr} = inet:getaddr(Host, inet),
+%% 	{ok, Addr} = gen_udp:open(0, [{active, false},{ifaddr, {local,"/dev/log"}}]),
+%%     case gen_udp:open(0) of
+%% 	io:format("~p~n", [AppName]),
+	case gen_udp:open(0, [local,{active, true},{buffer,1024000},{broadcast,false},{dontroute, false},{low_msgq_watermark, 819200},{high_msgq_watermark, 981920}]) of
         {ok, Socket} ->
             {ok, #state{
                     socket = Socket,
-                    address = Addr,
                     port = Port,
                     facility = Facility,
-                    app_name = AppName
+                    app_name = AppName,
+					host = Host
             }};
         {error, Reason} ->
             {stop, Reason}
@@ -190,9 +116,19 @@ init([AppName, Host, Port, Facility]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call(facility, _From, #state{facility=Facility}=State) ->
+	io:format("facility"),
     {reply, Facility, State};
 handle_call(app_name,  _From, #state{app_name=AppName}=State) ->
-    {reply, AppName, State}.
+	io:format("app_name"),
+    {reply, AppName, State};
+handle_call({send,Msg},_From, #state{socket=Socket,facility = Facility,app_name=AppName}=State) ->
+	%%debug
+%% 		io:format("~p~p~p~p~n", [Msg,Socket,State,?MODULE]),
+    Packet = build_packet(?MODULE, Msg, [{facility,Facility},{app_name,AppName}]),
+%% 		io:format("~p~n", [Msg]),
+%% 		io:format("~p~n", [Packet]),
+	gen_udp:send(Socket, {local, <<"/dev/log">>}, 0, Packet),
+    {reply, ok,State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -200,8 +136,20 @@ handle_call(app_name,  _From, #state{app_name=AppName}=State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({send, Packet}, #state{socket=Socket, address=Address, port=Port}=State) when is_binary(Packet) ->
-    gen_udp:send(Socket, Address, Port, Packet),
+handle_cast({send, Msg},#state{socket=Socket,facility = Facility,app_name=AppName}=State) ->
+	%%debug
+%% 		io:format("~p~n", [Facility]),
+%%     Packet = build_packet(?MODULE, Msg, [{facility,Facility},{app_name,AppName}]),
+    Pid = os:getpid(),
+    Level =  integer_to_list(6),
+	Packet = [
+              "<", Level, ">1 ", % syslog version 1
+              atom_to_list(AppName), " ",
+              Pid,
+              Msg, "\n"
+             ],
+    iolist_to_binary(Packet),
+	gen_udp:send(Socket, {local, <<"/dev/log">>}, 0, Packet),
     {noreply, State};
 
 handle_cast(_Msg, State) ->
@@ -244,7 +192,8 @@ get_app_name(Name) ->
     case gen_server:call(Name, app_name) of
         Atom when is_atom(Atom) -> atom_to_list(Atom);
         List when is_list(List) -> List;
-        Binary when is_binary(Binary) -> Binary
+        Binary when is_binary(Binary) -> Binary;
+		_ -> io:format("default_name")
     end.
 
 get_app_name(Name, Opts) ->
@@ -298,13 +247,17 @@ format_timestamp(TS) ->
 
 build_packet(Name, Msg, Opts) ->
     AppName = get_app_name(Name, Opts),
+%% 	io:format("~p~n",[AppName]),
     Pid = get_pid(Opts),
+%% 	io:format("~p~n",[Pid]),
     Hostname = get_hostname(Opts),
+%% 	io:format("~p~n",[Hostname]),
     Timestamp = get_timestamp(Opts),
-
+%% 	io:format("~p~n",[Timestamp]),
     Facility = get_facility(Name, Opts),
+%% 	io:format("~p~n",[Facility]),
     Level = get_level(Facility, Opts),
-
+%% 	io:format("~p~n",[Level]),
     Packet = [
               "<", Level, ">1 ", % syslog version 1
               Timestamp, " ",
@@ -314,7 +267,7 @@ build_packet(Name, Msg, Opts) ->
               " - - ", % MSGID is -, STRUCTURED-DATA is -
               Msg, "\n"
              ],
-
+%% 	io:format("~p~n",[Packet]),
     iolist_to_binary(Packet).
 
 atom_to_level(emergency) -> 0; % system is unusable
