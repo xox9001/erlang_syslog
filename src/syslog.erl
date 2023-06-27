@@ -136,17 +136,16 @@ handle_call({send,Msg},_From, #state{socket=Socket,facility = Facility,app_name=
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({send, Msg},#state{socket=Socket,facility = Facility,app_name=AppName}=State) ->
+handle_cast({send, Msg},#state{socket=Socket,app_name=AppName}=State) ->
 	%%debug
 %% 		io:format("~p~n", [Facility]),
 %%     Packet = build_packet(?MODULE, Msg, [{facility,Facility},{app_name,AppName}]),
-    Pid = os:getpid(),
+%%     Pid = os:getpid(),
     Level =  integer_to_list(6),
 	Packet = [
-              "<", Level, ">1 ", % syslog version 1
-              atom_to_list(AppName), " ",
-              Pid,
-              Msg, "\n"
+              "<", Level, ">", % syslog version 1
+              atom_to_list(AppName), ":",
+              Msg
              ],
     iolist_to_binary(Packet),
 	gen_udp:send(Socket, {local, <<"/dev/log">>}, 0, Packet),
